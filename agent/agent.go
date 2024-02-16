@@ -94,6 +94,7 @@ func StartAgent(ctx context.Context, port string) (func(context.Context) error, 
 	//удаляем все вычисления
 	serveMux.HandleFunc("/reboot", agent.reboot)
 	serveMux.HandleFunc("/newTimeLimit", agent.newTimeLimit)
+	serveMux.HandleFunc("/newTask", agent.newTask)
 
 	agent.Loacaladdr = ":" + port
 	agent.stop = make(chan struct{}, 32)
@@ -136,6 +137,7 @@ func (a *Agent) servrConn() {
 			a.mu.Lock()
 			num := a.numTread
 			a.mu.Unlock()
+			// запрашиваем таску если не заняты все потоки
 			if num > 0 {
 				a.mu.RLock()
 				dataJsn, err := json.Marshal(a)
@@ -150,51 +152,7 @@ func (a *Agent) servrConn() {
 				if err != nil {
 					PrintEr(err)
 				}
-
-				data, err := io.ReadAll(resp.Body)
-				//создаём копию потому что данные могут не сохраниться после закртытия соединения
-				//data := make([]byte, len(dat))
-				//copy(data, dat)
-				if err != nil {
-					PrintEr(err)
-					continue
-				}
-
-				//если есть ответ то выполняем задачу если нет то заново запрашиваем
-				if string(data) == "" {
-					Logg(data, "data zerro")
-					continue
-				}
-				tsk := &front.Task{}
-				err = json.Unmarshal(data, tsk)
-				if err != nil {
-					PrintEr(err)
-					continue
-				}
 				resp.Body.Close()
-				fmt.Println("agent new task", tsk)
-
-				//запускаем задачу на выполнение в отдельной горутине
-				go func() {
-					a.ExecuteTask(tsk)
-
-					// время после которого будет выполнена задача (считаем это время незначительным по сравнению с секундой)
-					timeStop := time.Duration(a.getTimeLimit(tsk.Expression)) * time.Second
-					select {
-					//если пришёл сигнал на перезагрузку (изменилось время выполнения операций +-*/)
-					case <-a.stop:
-						return
-					case <-time.After(timeStop):
-						err := a.sendTask(tsk)
-						PrintEr(err)
-					}
-
-					a.mu.Lock()
-					a.numTread++
-					a.mu.Unlock()
-
-					Logg("task is continue! ", tsk)
-				}()
 			}
 		}
 	}()
@@ -240,6 +198,43 @@ func (a *Agent) newTimeLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.operLimit = timeOper
+}
+
+// обнавляем лимиты времени выполнения задачи
+func (a *Agent) newTask(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		PrintEr(err)
+		return
+	}
+	tsk := &front.Task{}
+	err = json.Unmarshal(data, tsk)
+	if err != nil {
+		PrintEr(err)
+		return
+	}
+
+	//запускаем задачу на выполнение в отдельной горутине
+	go func() {
+		a.ExecuteTask(tsk)
+
+		// время после которого будет выполнена задача (считаем это время незначительным по сравнению с секундой)
+		timeStop := time.Duration(a.getTimeLimit(tsk.Expression)) * time.Second
+		select {
+		//если пришёл сигнал на перезагрузку (изменилось время выполнения операций +-*/)
+		case <-a.stop:
+			return
+		case <-time.After(timeStop):
+			err := a.sendTask(tsk)
+			PrintEr(err)
+		}
+
+		a.mu.Lock()
+		a.numTread++
+		a.mu.Unlock()
+
+		Logg("task is continue! ", tsk)
+	}()
 }
 
 func (a *Agent) ExecuteTask(tsk *front.Task) {

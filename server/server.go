@@ -17,7 +17,6 @@ import (
 	"last/front"
 	"net/http"
 	"sync"
-	"time"
 )
 
 type TaskInWork struct {
@@ -104,6 +103,7 @@ func (o *Orkestrator) getTask(w http.ResponseWriter, r *http.Request) {
 	_, ok := o.agents[ag.Loacaladdr] // что бы отображались только новые агенты
 	o.agents[ag.Loacaladdr] = &ag    //записываем нового агента если есть обновляем
 	o.mu.Unlock()
+	addrAgent := ag.Loacaladdr
 
 	//если действительно новый агент
 	if !ok {
@@ -129,17 +129,8 @@ func (o *Orkestrator) getTask(w http.ResponseWriter, r *http.Request) {
 		o.taskInWork = append(o.taskInWork, &TaskInWork{tsk, ag.Loacaladdr})
 		o.mu.Unlock()
 
-		data, err = json.Marshal(tsk)
-		if err != nil {
-			agent.PrintEr(err)
-			return
-		}
+		front.Send(tsk, "http://localhost"+addrAgent)
 		Log("Task Sending")
-		n, err := w.Write(data)
-
-		Logg(n, err)
-
-		time.Sleep(time.Microsecond)
 	}
 }
 

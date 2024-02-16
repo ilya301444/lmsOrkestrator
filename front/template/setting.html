@@ -4,17 +4,39 @@
 		<title>Настройки</title>
 	</head>
 <body>
-	<form action="/setting"></form>
-	<table>
-		<tr>
-			<td>Выражение</td><td>Максимальное время выполнения</td>
-		</tr>
-		{{range .}}
-			<tr>
-				<td>{{.Expression}}</td><td>{{.Time}}</td>
-			</tr>
-		{{end}}
-	</table>
+	<a href="/listtask">list task 		</a>	&nbsp; &nbsp;
+	<a href="/newtask">new task  		</a>	&nbsp; &nbsp;
+    <a href="/setting">setting  		</a>	&nbsp; &nbsp;
+    <a href="/servers">server   		</a>	&nbsp; &nbsp;
+
+	<p>Параметры времени выполнения операций</p>
+	<p>При изменении параметра весь прогресс в решении задач сбрасывается</p>
+
+	<form action="/setting" method="get">
+		+<input type="text" name="plus" value="{{.Plus}}">
+		<input type="submit">
+	</form>		
+	<br>	
+	<form action="/setting" method="get">
+		-<input type="text" name="minus" value="{{.Minus}}">
+		<input type="submit">
+	</form>	
+	<br>	
+	<form action="/setting" method="get">
+		*<input type="text" name="mul" value="{{.Mul}}">
+		<input type="submit">
+	</form>	
+	<br>	
+	<form action="/setting" method="get">
+		/<input type="text" name="div" value="{{.Div}}">
+		<input type="submit">
+	</form>	
+	<form action="/setting" method="get">
+		Limit time<input type="text" name="all" value="{{.All}}">
+		<input type="submit">
+	</form>
+	<br>
+
 
 </body>
 </html>

@@ -1,0 +1,26 @@
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>Calculator</title>
+	</head>
+<body>
+	<a href="/listtask">list task 		</a>	&nbsp; &nbsp;
+	<a href="/newtask">new task  		</a>	&nbsp; &nbsp;
+    <a href="/setting">setting  		</a>	&nbsp; &nbsp;
+    <a href="/servers">server   		</a>	&nbsp; &nbsp;
+	
+	<br>
+	<p>Список всех выражений</p>
+	<p>Статус 0 - в процессе 1 - выполнено</p>
+	<table border="1px" bordercolor="black">
+		<tr>
+			<td>Выражение</td><td>Статус</td><td>Валидно ли выражение</td><td>Результат</td>
+		</tr>
+		{{range .}}
+			<tr>
+				<td>{{.Expression}}</td><td>{{.Status}}</td><td>{{.ValidExp}}</td><td>{{.Result}}</td>
+			</tr>
+		{{end}}
+	</table>
+</body>
+</html>

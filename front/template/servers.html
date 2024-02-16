@@ -4,10 +4,16 @@
 		<title>Сервера</title>
 	</head>
 <body>
+	<a href="/listtask">list task 		</a>	&nbsp; &nbsp;
+	<a href="/newtask">new task  		</a>	&nbsp; &nbsp;
+    <a href="/setting">setting  		</a>	&nbsp; &nbsp;
+    <a href="/servers">server   		</a>	&nbsp; &nbsp;
+
+	<p>Страница по мониторину агентов</p>
 	<form action="/servers"></form>
-	<table>
+	<table border="1px">
 		<tr>
-			<td>Cервер</td><td>Статус</td>
+			<td>Агент</td><td>Статус</td>
 		</tr>
 		{{range .}}
 			<tr>

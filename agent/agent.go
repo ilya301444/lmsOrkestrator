@@ -24,31 +24,49 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"last/front"
 	"log"
 	"net/http"
 	"runtime"
+	"sync"
 	"time"
 
 	expp "github.com/overseven/go-math-expression-parser/parser"
 )
 
-type Task struct {
-	resultChan chan int
-	ValueTask  string
-}
-
 type Agent struct {
 	Id         int
 	Loacaladdr string // адрес агента
-	NumTread   int
-	Status     int             // < 0  - мёртв 1 - жив если 100 раз мёртв(100с) - то исключаем из агентов
-	listTask   map[string]Task //expression Task
+	Status     int    // < 0  - мёртв 100 - жив если 100 раз мёртв(100с) - то исключаем из агентов(нужно для сервера)
+
+	operLimit  front.Operation //лимит времени выполнения подзадачи
+	mu         sync.RWMutex
+	numTread   int
+	limitTread int
+	stop       chan struct{}
 }
 
 var (
 	serverAddr = "127.0.0.1:8010" //addres orkestratora
+	//настройки интервала отправки запроса на сервер
+	timeSleep = 1000 * time.Millisecond
+	agent     Agent
 )
 
+func init() {
+	agent.numTread = runtime.NumCPU() - 1
+	agent.limitTread = runtime.NumCPU() - 1
+	agent.Status = 100 //после 100 раза (100с) без ответа будет значить что сервис умер
+
+	agent.operLimit.All = 200
+	agent.operLimit.Plus = 50
+	agent.operLimit.Minus = 50
+	agent.operLimit.Mul = 50
+	agent.operLimit.Div = 50
+}
+
+// функции отладки для агента
 func PrintEr(err error) {
 	if err != nil {
 		fmt.Println("log:", err)
@@ -61,107 +79,193 @@ func FatalEr(err error) {
 	}
 }
 
+// Log для агента
 func Log(s string) {
-	fmt.Println("log:", s)
+	fmt.Println("agent log:", s)
 }
 
-var agent Agent
+func Logg(s ...any) {
+	fmt.Println("agent log:", s)
+}
 
 // StartAgent запускает основу с которой будет общаться
 func StartAgent(ctx context.Context, port string) (func(context.Context) error, error) {
 	serveMux := http.NewServeMux()
-	serveMux.HandleFunc("/", agent.newTask)
-	serveMux.HandleFunc("/heartBit", agent.heartBit)
+	//удаляем все вычисления
+	serveMux.HandleFunc("/reboot", agent.reboot)
+	serveMux.HandleFunc("/newTimeLimit", agent.newTimeLimit)
 
 	agent.Loacaladdr = ":" + port
-	err := agent.servrConn()
-	for err != nil {
-		time.Sleep(200 * time.Millisecond)
-		err = agent.servrConn()
-		fmt.Println("errror", err)
-
-	}
+	agent.stop = make(chan struct{}, 32)
+	agent.servrConn()
 
 	srv := &http.Server{Addr: agent.Loacaladdr, Handler: serveMux}
 	go func() {
 		err := srv.ListenAndServe()
+		agent.mu.Lock()
+		agent.Status = 0
+		agent.mu.Unlock()
+
 		PrintEr(err)
 	}()
 
 	return srv.Shutdown, nil
 }
 
-// servrConn подключаемся к серверу, заявляем о новом агенте
-func (a *Agent) servrConn() error {
-	a.NumTread = runtime.NumCPU() - 1
-	a.Status = 1
-	dataJsn, err := json.Marshal(a)
-	if err != nil {
-		return err
-	}
+// оркестратор в агенте (запускает потоки, в зависимости от полученных задачь от сервера)
+// servrConn подключаемся к серверу
+func (a *Agent) servrConn() {
+	// горутина которая говорит что данный агент всё ещё жив
+	//heartBit
+	go func() {
+		for {
+			time.Sleep(timeSleep)
+			a.mu.RLock()
+			data := a
+			a.mu.RUnlock()
 
-	resp, err := http.Post("http://"+serverAddr+"/newAgent", "application/json", bytes.NewBuffer(dataJsn))
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
+			err := front.Send(data, "http://"+serverAddr+"/getTask")
+			PrintEr(err)
+		}
+	}()
+
+	//горутина по получению задач
+	go func() {
+		for {
+			time.Sleep(timeSleep)
+			a.mu.Lock()
+			num := a.numTread
+			a.mu.Unlock()
+			if num > 0 {
+				a.mu.RLock()
+				dataJsn, err := json.Marshal(a)
+				a.mu.RUnlock()
+
+				if err != nil {
+					PrintEr(err)
+				}
+
+				//запросили задачу
+				resp, err := http.Post("http://"+serverAddr+"/getTask", "application/json", bytes.NewBuffer(dataJsn))
+				if err != nil {
+					PrintEr(err)
+				}
+
+				data, err := io.ReadAll(resp.Body)
+				//создаём копию потому что данные могут не сохраниться после закртытия соединения
+				//data := make([]byte, len(dat))
+				//copy(data, dat)
+				if err != nil {
+					PrintEr(err)
+					continue
+				}
+
+				//если есть ответ то выполняем задачу если нет то заново запрашиваем
+				if string(data) == "" {
+					Logg(data, "data zerro")
+					continue
+				}
+				tsk := &front.Task{}
+				err = json.Unmarshal(data, tsk)
+				if err != nil {
+					PrintEr(err)
+					continue
+				}
+				resp.Body.Close()
+				fmt.Println("agent new task", tsk)
+
+				//запускаем задачу на выполнение в отдельной горутине
+				go func() {
+					a.ExecuteTask(tsk)
+
+					// время после которого будет выполнена задача (считаем это время незначительным по сравнению с секундой)
+					timeStop := time.Duration(a.getTimeLimit(tsk.Expression)) * time.Second
+					select {
+					//если пришёл сигнал на перезагрузку (изменилось время выполнения операций +-*/)
+					case <-a.stop:
+						return
+					case <-time.After(timeStop):
+						err := a.sendTask(tsk)
+						PrintEr(err)
+					}
+
+					a.mu.Lock()
+					a.numTread++
+					a.mu.Unlock()
+
+					Logg("task is continue! ", tsk)
+				}()
+			}
+		}
+	}()
 }
 
-// NewTask получение новой задачи
-func (a *Agent) newTask(w http.ResponseWriter, r *http.Request) {
-
+// выдаёт сколько времени надо выполнять задачу в зависимости от знака в выражении
+func (a *Agent) getTimeLimit(exp string) int {
+	if len(exp) == 3 {
+		ch := exp[1]
+		switch ch {
+		case '+':
+			return a.operLimit.Plus
+		case '-':
+			return a.operLimit.Minus
+		case '*':
+			return a.operLimit.Mul
+		case '/':
+			return a.operLimit.Div
+		}
+	}
+	return a.operLimit.All
 }
 
-// heartBit проверка состояния со стороны оркестратора
-func (a *Agent) heartBit(w http.ResponseWriter, r *http.Request) {
-	dataJsn, err := json.Marshal(a)
+// останавливаем все задачи
+func (a *Agent) reboot(w http.ResponseWriter, r *http.Request) {
+	for i := 0; i < a.limitTread-a.numTread; i++ {
+		a.stop <- struct{}{}
+	}
+}
+
+// обнавляем лимиты времени выполнения задачи
+func (a *Agent) newTimeLimit(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		PrintEr(err)
+		Logg(err)
 		return
 	}
 
-	w.Write(dataJsn)
+	timeOper := front.Operation{}
+	err = json.Unmarshal(data, &timeOper)
+	if err != nil {
+		Logg(err)
+		return
+	}
+	a.operLimit = timeOper
 }
 
-func (a *Agent) ExecuteTask(str string) int {
+func (a *Agent) ExecuteTask(tsk *front.Task) {
+	a.mu.Lock()
+	a.numTread--
+	a.mu.Unlock()
+	str := tsk.Expression
+
 	parser := expp.NewParser()
-	// parsing
 	_, err := parser.Parse(str)
 	if err != nil {
-		fmt.Println("Error: ", err)
-		return 0
+		PrintEr(err)
 	}
-	//fmt.Println("\nParsed execution tree:", exp)
-	// output: 'Parsed execution tree: ( * 10 ( bar ( 60,6,0.6 ) ) )'
-	// execution of the expression
 	result, err := parser.Evaluate(map[string]float64{})
 	if err != nil {
 		fmt.Println("Error: ", err)
+		return
 	}
-	return int(result)
+
+	Logg(result, str)
+	tsk.Status = 1
+	tsk.Result = int(result)
 }
 
-/*
-func getPort() (int, error) {
-	resp, err := http.Get(serverAddr)
-	if err != nil {
-		PrintEr(err)
-		return 0, nil
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	defer resp.Body.Close()
-	if err != nil {
-		PrintEr(err)
-		return 0, err
-	}
-
-	num, err := strconv.Atoi(string(data))
-	if err != nil {
-		PrintEr(err)
-		return 0, err
-	}
-	return num, nil
+// agent - server
+// отсылаем таску серверу с резуальтатом
+func (a *Agent) sendTask(tsk *front.Task) error {
+	return front.Send(tsk, "http://"+serverAddr+"/sendTask")
 }
-*/

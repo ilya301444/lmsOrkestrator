@@ -10,42 +10,45 @@ localhost:8010
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"last/agent"
+	"last/front"
 	"net/http"
 	"sync"
 	"time"
 )
 
 type TaskInWork struct {
-	task  string
+	task  *front.Task
 	agent string // addr agent
 }
 
 type Orkestrator struct {
 	// по адресу находим нужный агент
-	agents     map[string]agent.Agent //список серверов(агентов ) готовых выполнить задачу
-	tasks      []string               //очередь из задач
-	taskInWork []TaskInWork
-	status     int // ждём таску(или другое событие) 0 или берём её из очереди 1 (нужно для синфронизации когда очередь пусата)
-	syncTask   chan struct{}
-	mu         sync.Mutex
+	agents     map[string]*agent.Agent //список серверов(агентов ) готовых выполнить задачу
+	tasks      []*front.Task           //очередь из задач
+	taskInWork []*TaskInWork
+
+	mu sync.Mutex
 }
 
-var orkestr Orkestrator
+var (
+	orkestr   Orkestrator
+	addrFront = "localhost:8000"
+)
 
 func init() {
-	orkestr.agents = make(map[string]agent.Agent)
-	orkestr.syncTask = make(chan struct{}) // когда приходит новая таска посылаем сигнал чтоб снять оркестратор с ожидания
+	orkestr.agents = make(map[string]*agent.Agent)
 }
 
 func StartSrv(ctx context.Context) (func(context.Context) error, error) {
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/", orkestr.newTask)
-	serverMux.HandleFunc("/newAgent", orkestr.newAgent)
+	//агент может получить таску
+	serverMux.HandleFunc("/getTask", orkestr.getTask)
+	serverMux.HandleFunc("/sendTask", orkestr.sendAnswerTask)
 
 	srv := &http.Server{Addr: ":8010", Handler: serverMux}
 	go func() {
@@ -55,6 +58,7 @@ func StartSrv(ctx context.Context) (func(context.Context) error, error) {
 	return srv.Shutdown, nil
 }
 
+// front - server
 // newTask полученная с фронта
 func (o *Orkestrator) newTask(w http.ResponseWriter, r *http.Request) {
 	body := r.Body
@@ -64,10 +68,25 @@ func (o *Orkestrator) newTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Log("New task:", string(data))
-	o.tasks = append(o.tasks, string(data))
+
+	tsk := front.Task{}
+	err = json.Unmarshal(data, &tsk)
+	if err != nil {
+		agent.PrintEr(err)
+		return
+	}
+	//записываем в очередь
+	o.mu.Lock()
+	o.tasks = append(o.tasks, &tsk)
+	o.mu.Unlock()
 }
 
-func (o *Orkestrator) newAgent(w http.ResponseWriter, r *http.Request) {
+// server - agent
+// отдаём задачу агенту
+// агент спаминт нас запросами мы ему отдаём таски
+// это функция по получению Хёртбита и добавления новых агентов и отдачи таски
+// новому агенту
+func (o *Orkestrator) getTask(w http.ResponseWriter, r *http.Request) {
 	body := r.Body
 	data, err := io.ReadAll(body)
 	if err != nil {
@@ -75,66 +94,74 @@ func (o *Orkestrator) newAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//получили запрос от агента и распасим его данные
 	var ag agent.Agent
 	if err := json.Unmarshal(data, &ag); err != nil {
 		agent.PrintEr(err)
 		return
 	}
-	o.agents[ag.Loacaladdr] = ag
-	Log("new Agent: ", ag.Loacaladdr)
+	o.mu.Lock()
+	_, ok := o.agents[ag.Loacaladdr] // что бы отображались только новые агенты
+	o.agents[ag.Loacaladdr] = &ag    //записываем нового агента если есть обновляем
+	o.mu.Unlock()
+
+	//если действительно новый агент
+	if !ok {
+		Log("new Agent: ", ag.Loacaladdr)
+	}
+
+	var tsk *front.Task
+	//если есть таски в очереди берём 1 таску
+	o.mu.Lock()
+	if len(o.tasks) != 0 {
+		tsk = o.tasks[0]
+		if len(o.tasks) > 1 {
+			o.tasks = o.tasks[1:]
+		} else {
+			o.tasks = nil
+		}
+	}
+	o.mu.Unlock()
+
+	//если были таски в очереди
+	if tsk != nil {
+		o.mu.Lock()
+		o.taskInWork = append(o.taskInWork, &TaskInWork{tsk, ag.Loacaladdr})
+		o.mu.Unlock()
+
+		data, err = json.Marshal(tsk)
+		if err != nil {
+			agent.PrintEr(err)
+			return
+		}
+		Log("Task Sending")
+		n, err := w.Write(data)
+
+		Logg(n, err)
+
+		time.Sleep(time.Microsecond)
+	}
 }
 
-// hertBit смотрим живой ли агент и обновляем инф о нём
-func (o *Orkestrator) hertBit() {
+// получаем таску с ответом
+func (o *Orkestrator) sendAnswerTask(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		agent.PrintEr(err)
+		return
+	}
 
+	tsk := front.Task{}
+	err = json.Unmarshal(data, &tsk)
+	if err != nil {
+		agent.PrintEr(err)
+		return
+	}
+
+	Logg("получили ответ на таску", tsk)
+	front.Send(&tsk, "http://"+addrFront+"/getAnswer")
 }
 
 func (o *Orkestrator) MainOrkestrator() {
 
-	go func() {
-		for {
-			adrAgent := ""
-			//идём поочереди и раздаём задачи агентам
-			for {
-				if len(o.tasks) != 0 {
-					o.status = 1
-					//выбираем агент с наибольшим количеством потоков
-					max := 0
-					for k, v := range o.agents {
-						if v.NumTread > max {
-							max = v.NumTread
-							adrAgent = k
-						}
-					}
-					o.sendTask(adrAgent, o.tasks[0])
-					if len(o.tasks) > 1 {
-						o.tasks = o.tasks[1:]
-					} else {
-						o.tasks = nil
-					}
-				} else {
-					break
-				}
-			}
-			o.status = 0
-			<-o.syncTask
-		}
-
-		time.Sleep(20 * time.Millisecond) // так как время выполнения 1 задачи 1с то 20мс должно хватить для
-	}()
-}
-
-// посылаем таску агенту
-func (o *Orkestrator) sendTask(adrAgent string, task string) {
-	dataJsn, err := json.Marshal()
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.Post("http://"+serverAddr+"/newAgent", "application/json", bytes.NewBuffer(dataJsn))
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
 }

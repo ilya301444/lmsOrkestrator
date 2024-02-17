@@ -191,7 +191,7 @@ func (d *Data) getAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 // Send посылает даннные через пост в виде json по адресу
-func Send(a any, urlAdr string) error {
+func Send(a interface{}, urlAdr string) error {
 	dataJsn, err := json.Marshal(a)
 	if err != nil {
 		return err

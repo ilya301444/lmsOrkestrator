@@ -84,7 +84,7 @@ func Log(s string) {
 	fmt.Println("agent log:", s)
 }
 
-func Logg(s ...any) {
+func Logg(s ...interface{}) {
 	fmt.Println("agent log:", s)
 }
 
@@ -113,7 +113,7 @@ func StartAgent(ctx context.Context, port string) (func(context.Context) error, 
 	return srv.Shutdown, nil
 }
 
-// оркестратор в агенте (запускает потоки, в зависимости от полученных задачь от сервера)
+// типа оркестратор в агенте (запускает потоки, как только пришла задача от сервера от сервера)
 // servrConn подключаемся к серверу
 func (a *Agent) servrConn() {
 	// горутина которая говорит что данный агент всё ещё жив
@@ -148,11 +148,10 @@ func (a *Agent) servrConn() {
 				}
 
 				//запросили задачу
-				resp, err := http.Post("http://"+serverAddr+"/getTask", "application/json", bytes.NewBuffer(dataJsn))
+				_, err = http.Post("http://"+serverAddr+"/getTask", "application/json", bytes.NewBuffer(dataJsn))
 				if err != nil {
 					PrintEr(err)
 				}
-				resp.Body.Close()
 			}
 		}
 	}()
@@ -237,6 +236,7 @@ func (a *Agent) newTask(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// ExecuteTask решает пример ответ записывает в структуру
 func (a *Agent) ExecuteTask(tsk *front.Task) {
 	a.mu.Lock()
 	a.numTread--

@@ -43,5 +43,5 @@ func main() {
 	<-sigChan
 
 	downServ(ctx)
-	time.Sleep(time.Microsecond)
+	time.Sleep(10 * time.Millisecond)
 }

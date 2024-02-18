@@ -29,6 +29,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +46,7 @@ type Agent struct {
 	numTread   int
 	limitTread int
 	stop       chan struct{}
+	stopAgent  chan struct{}
 }
 
 var (
@@ -95,6 +97,7 @@ func StartAgent(ctx context.Context, port string) (func(context.Context) error, 
 	serveMux.HandleFunc("/reboot", agent.reboot)
 	serveMux.HandleFunc("/newTimeLimit", agent.newTimeLimit)
 	serveMux.HandleFunc("/newTask", agent.newTask)
+	serveMux.HandleFunc("/reboot", agent.reboot)
 
 	agent.Loacaladdr = ":" + port
 	agent.stop = make(chan struct{}, 32)
@@ -103,10 +106,9 @@ func StartAgent(ctx context.Context, port string) (func(context.Context) error, 
 	srv := &http.Server{Addr: agent.Loacaladdr, Handler: serveMux}
 	go func() {
 		err := srv.ListenAndServe()
-		agent.mu.Lock()
-		agent.Status = 0
-		agent.mu.Unlock()
 
+		agent.stopAgent <- struct{}{}
+		agent.stopAgent <- struct{}{}
 		PrintEr(err)
 	}()
 
@@ -127,10 +129,17 @@ func (a *Agent) servrConn() {
 
 			err := front.Send(data, "http://"+serverAddr+"/getTask")
 			PrintEr(err)
+
+			select {
+			case <-a.stopAgent:
+				return
+			default:
+			}
 		}
 	}()
 
-	//горутина по получению задач
+	//горутина по получению задач постоянно отправляем запрос если есть потоки и
+	//нам приходят задачи через пост в другую функцию
 	go func() {
 		for {
 			time.Sleep(timeSleep)
@@ -153,14 +162,32 @@ func (a *Agent) servrConn() {
 					PrintEr(err)
 				}
 			}
+
+			select {
+			case <-a.stopAgent:
+				return
+			default:
+			}
 		}
 	}()
 }
 
 // выдаёт сколько времени надо выполнять задачу в зависимости от знака в выражении
 func (a *Agent) getTimeLimit(exp string) int {
+	index := 0
+	switch {
+	case strings.Contains(exp, "+"):
+		index = strings.IndexByte(exp, '+')
+	case strings.Contains(exp, "-"):
+		index = strings.IndexByte(exp, '-')
+	case strings.Contains(exp, "*"):
+		index = strings.IndexByte(exp, '*')
+	case strings.Contains(exp, "/"):
+		index = strings.IndexByte(exp, '/')
+	}
+
 	if len(exp) == 3 {
-		ch := exp[1]
+		ch := exp[index]
 		switch ch {
 		case '+':
 			return a.operLimit.Plus
@@ -177,7 +204,12 @@ func (a *Agent) getTimeLimit(exp string) int {
 
 // останавливаем все задачи
 func (a *Agent) reboot(w http.ResponseWriter, r *http.Request) {
-	for i := 0; i < a.limitTread-a.numTread; i++ {
+	Log("rebooting")
+	a.mu.Lock()
+	count := a.limitTread - a.numTread
+	a.mu.Unlock()
+	for i := 0; i < count; i++ {
+		Log("send stop")
 		a.stop <- struct{}{}
 	}
 }
@@ -196,10 +228,15 @@ func (a *Agent) newTimeLimit(w http.ResponseWriter, r *http.Request) {
 		Logg(err)
 		return
 	}
+
+	Log("update time limit")
+	a.mu.Lock()
 	a.operLimit = timeOper
+	a.mu.Unlock()
+	a.reboot(w, r) // перезагружаем и удаляем все таски
 }
 
-// обнавляем лимиты времени выполнения задачи
+// получаем задачу и запускаем горутину для её выполнения
 func (a *Agent) newTask(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -222,7 +259,7 @@ func (a *Agent) newTask(w http.ResponseWriter, r *http.Request) {
 		select {
 		//если пришёл сигнал на перезагрузку (изменилось время выполнения операций +-*/)
 		case <-a.stop:
-			return
+			Log("stoped task")
 		case <-time.After(timeStop):
 			err := a.sendTask(tsk)
 			PrintEr(err)

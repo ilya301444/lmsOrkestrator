@@ -12,12 +12,16 @@
 # Команды для тестирования в терминале
 
 Посылаем значение выражения (exp)
-curl -v -d "exp=13" -X POST http://localhost:8000/
+curl -v -d "exp=13" -X POST http://localhost:8000/newtask
 
 !!!!! Есть проблемма при отправке через консоль символа + он заменяется на пробел
 в браузере такой проблеммы нет 
-curl -v -d "exp=2/2*(2+2)" -X POST http://localhost:8000/
+curl -v -d "exp=2/2*(2+2)" -X POST http://localhost:8000/newtask
+В результате выражение не принимается и считается не валидным и мы получает ответ 400
+Решение вводить выражение с плюсов в браузере
 
+get запрос
+curl -v -X GET http://localhost:8000/getAgentList
 
 ### Структура Работы программы 
 Всё общение идёт через http протокол  и Post запросы
@@ -95,6 +99,10 @@ set GO111MODULE=on)
 если не скачались зависимости то необходимо скачать пакет для вычисления выражения 
 github.com/overseven/go-math-expression-parser
 go get github.com/overseven/go-math-expression-parser
+
+
+
+# Запросы
 
 
 # Что сделано и не сделано

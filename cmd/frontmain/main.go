@@ -44,5 +44,5 @@ func main() {
 
 	downFront(ctx)
 
-	time.Sleep(time.Microsecond)
+	time.Sleep(10 * time.Millisecond)
 }

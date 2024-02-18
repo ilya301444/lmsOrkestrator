@@ -57,5 +57,5 @@ func main() {
 	downAgent(ctx)
 	downFront(ctx)
 	downServ(ctx)
-	time.Sleep(time.Microsecond)
+	time.Sleep(10 * time.Millisecond)
 }

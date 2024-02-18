@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,7 @@ type Operation struct {
 	Mul   int
 	Div   int
 	All   int
+	mu    sync.Mutex
 }
 
 // список агентов которые нужны для отображения
@@ -53,10 +55,12 @@ type Data struct {
 	mapTask  map[string]*Task
 	srvList  []*Agents
 	timeOper Operation
+	mu       sync.Mutex
 }
 
 var data Data
 var adrSrv = "localhost:8010"
+var srvStatus = 0 // 0 - нет ответа от сервера 1 - норм 2 - нет связи ни с одним агентов
 
 func init() {
 	data.mapTask = make(map[string]*Task)
@@ -77,6 +81,8 @@ func StartFront(ctx context.Context) (func(context.Context) error, error) {
 	serverMux.HandleFunc("/setting", data.setting)
 	serverMux.HandleFunc("/servers", data.servers)
 	serverMux.HandleFunc("/getAnswer", data.getAnswer)
+	serverMux.HandleFunc("/updateAgents", data.updateAgents)
+	serverMux.HandleFunc("/getAgentList", data.getAgentList)
 
 	srv := &http.Server{Addr: ":8000", Handler: serverMux}
 	go func() {
@@ -101,6 +107,8 @@ func StartFront(ctx context.Context) (func(context.Context) error, error) {
 	templ, err = template.ParseFiles("front/template/main.html")
 	FatalEr(err)
 	data.cashe["main"] = templ
+
+	checkSrvStatus()
 
 	return srv.Shutdown, nil
 }
@@ -128,10 +136,15 @@ func (d *Data) new(w http.ResponseWriter, r *http.Request) {
 
 	res := validExpression(expression)
 	data.addData(expression, res)
-	if res {
-		w.WriteHeader(200)
+
+	if srvStatus == 1 {
+		if res {
+			w.WriteHeader(200)
+		} else {
+			w.WriteHeader(400)
+		}
 	} else {
-		w.WriteHeader(400)
+		w.WriteHeader(500)
 	}
 
 	err := data.cashe["newtask"].Execute(w, nil)
@@ -140,24 +153,25 @@ func (d *Data) new(w http.ResponseWriter, r *http.Request) {
 
 // addData добавляем выражения в массив данных
 func (d *Data) addData(expression string, res bool) error {
-	previosId := 0
-	if data.listTask != nil {
-		previosId = len(d.listTask) - 1
-	}
+	///previosId := 0
+	previosId := len(d.listTask)
 
 	newData := &Task{
-		Id: previosId + 1, Expression: expression,
-		ValidExp: res, Time: 200,
+		Id: previosId, Expression: expression,
+		ValidExp: res, Time: d.timeOper.All,
 		Status: 0,
 	}
 
 	if _, ok := data.mapTask[expression]; !ok {
 		data.mapTask[expression] = newData
-		//посылаем данные
-		err := d.sendSrv(newData)
-		for err != nil {
-			time.Sleep(20 * time.Millisecond)
-			err = d.sendSrv(newData)
+
+		if res {
+			//посылаем данные
+			err := d.sendSrv(newData)
+			for err != nil {
+				time.Sleep(20 * time.Millisecond)
+				err = d.sendSrv(newData)
+			}
 		}
 		data.listTask = append(d.listTask, newData)
 		Log(newData)
@@ -186,8 +200,8 @@ func (d *Data) getAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := tsk.Id
-	d.listTask[id-1].Result = tsk.Result
-	d.listTask[id-1].Status = 1
+	d.listTask[id].Result = tsk.Result
+	d.listTask[id].Status = 1
 }
 
 // Send посылает даннные через пост в виде json по адресу
@@ -215,28 +229,41 @@ func (d *Data) setting(w http.ResponseWriter, r *http.Request) {
 	div := r.FormValue("div")
 	all := r.FormValue("all")
 
-	if plus != "" {
-		tm, _ := strconv.Atoi(plus)
-		data.timeOper.Plus = tm
-	}
-	if minus != "" {
-		tm, _ := strconv.Atoi(minus)
-		data.timeOper.Minus = tm
-	}
-	if mul != "" {
-		tm, _ := strconv.Atoi(mul)
-		data.timeOper.Mul = tm
-	}
-	if div != "" {
-		tm, _ := strconv.Atoi(div)
-		data.timeOper.Div = tm
-	}
-	if all != "" {
-		tm, _ := strconv.Atoi(all)
-		data.timeOper.All = tm
+	switch {
+	case plus != "":
+		tm, err := strconv.Atoi(plus)
+		if err != nil || tm == d.timeOper.Plus {
+			return
+		}
+		d.timeOper.Plus = tm
+	case minus != "":
+		tm, err := strconv.Atoi(minus)
+		if err != nil || tm == d.timeOper.Minus {
+			return
+		}
+		d.timeOper.Minus = tm
+	case mul != "":
+		tm, err := strconv.Atoi(mul)
+		if err != nil || tm == d.timeOper.Mul {
+			return
+		}
+		d.timeOper.Mul = tm
+	case div != "":
+		tm, err := strconv.Atoi(div)
+		if err != nil || tm == d.timeOper.Div {
+			return
+		}
+		d.timeOper.Div = tm
+	case all != "":
+		tm, err := strconv.Atoi(all)
+		if err != nil || tm == d.timeOper.All {
+			return
+		}
+		d.timeOper.All = tm
 	}
 
 	if plus != "" || minus != "" || mul != "" || div != "" || all != "" {
+		Send(d.timeOper, "http://"+adrSrv+"/updateTime")
 		fmt.Println(plus, minus, mul, div, all)
 	}
 }
@@ -245,6 +272,54 @@ func (d *Data) setting(w http.ResponseWriter, r *http.Request) {
 func (d *Data) servers(w http.ResponseWriter, r *http.Request) {
 	err := data.cashe["servers"].Execute(w, d.srvList)
 	PrintEr(err)
+}
+
+// обновляем список серверов (Агентов)
+func (d *Data) updateAgents(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return
+	}
+
+	lst := []*Agents{}
+	err = json.Unmarshal(data, &lst)
+	if err != nil {
+		return
+	}
+	d.srvList = lst
+}
+
+// Выдаём список агентов по запросу
+func (d *Data) getAgentList(w http.ResponseWriter, r *http.Request) {
+	data, err := json.Marshal(d.srvList)
+	if err != nil {
+		return
+	}
+	w.Write(data)
+}
+
+// функция которая будет запрашивать сервер о его состоянии и менять глобальную переменную
+func checkSrvStatus() {
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			resp, err := http.Get("http://" + adrSrv + "/statusSrv")
+			if err != nil {
+				continue
+			}
+			defer resp.Body.Close()
+
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				continue
+			}
+			status, err := strconv.Atoi(string(data))
+			if err != nil {
+				continue
+			}
+			srvStatus = status
+		}
+	}()
 }
 
 // ------ Logg

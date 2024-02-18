@@ -97,7 +97,6 @@ func StartAgent(ctx context.Context, port string) (func(context.Context) error, 
 	serveMux.HandleFunc("/reboot", agent.reboot)
 	serveMux.HandleFunc("/newTimeLimit", agent.newTimeLimit)
 	serveMux.HandleFunc("/newTask", agent.newTask)
-	serveMux.HandleFunc("/reboot", agent.reboot)
 
 	agent.Loacaladdr = ":" + port
 	agent.stop = make(chan struct{}, 32)
@@ -174,30 +173,14 @@ func (a *Agent) servrConn() {
 
 // выдаёт сколько времени надо выполнять задачу в зависимости от знака в выражении
 func (a *Agent) getTimeLimit(exp string) int {
-	index := 0
-	switch {
-	case strings.Contains(exp, "+"):
-		index = strings.IndexByte(exp, '+')
-	case strings.Contains(exp, "-"):
-		index = strings.IndexByte(exp, '-')
-	case strings.Contains(exp, "*"):
-		index = strings.IndexByte(exp, '*')
-	case strings.Contains(exp, "/"):
-		index = strings.IndexByte(exp, '/')
-	}
 
-	if len(exp) == 3 {
-		ch := exp[index]
-		switch ch {
-		case '+':
-			return a.operLimit.Plus
-		case '-':
-			return a.operLimit.Minus
-		case '*':
-			return a.operLimit.Mul
-		case '/':
-			return a.operLimit.Div
-		}
+	plus := strings.Count(exp, "+")
+	minus := strings.Count(exp, "-")
+	mul := strings.Count(exp, "*")
+	div := strings.Count(exp, "/")
+	//если не только 1 знак в выражении
+	if plus+minus+mul+div > 0 {
+		return plus*a.operLimit.Plus + minus*a.operLimit.Minus + mul*a.operLimit.Mul + div*a.operLimit.Div
 	}
 	return a.operLimit.All
 }

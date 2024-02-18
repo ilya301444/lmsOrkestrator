@@ -38,17 +38,17 @@ func restoreCondact() {
 		return
 	}
 	defer f.Close()
-	data, err := io.ReadAll(f)
+	dat, err := io.ReadAll(f)
 	if err != nil {
 		PrintEr(err)
 		return
 	}
 
-	err = json.Unmarshal(data, &data)
+	err = json.Unmarshal(dat, &data)
 
 	if err != nil {
 		PrintEr(err)
-		fmt.Println(string(data))
+		fmt.Println(string(dat))
 		return
 	}
 }

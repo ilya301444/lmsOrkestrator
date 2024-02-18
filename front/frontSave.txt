@@ -1,1 +1,1 @@
-{"TimeOper":{"Plus":50,"Minus":50,"Mul":50,"Div":50,"All":200}}
+{"ListTask":[{"Id":0,"Subid":0,"Expression":"2+2","ValidExp":true,"Time":200,"Status":1,"Result":4},{"Id":1,"Subid":0,"Expression":"2+22","ValidExp":true,"Time":200,"Status":0,"Result":0}],"MapTask":{"2+2":{"Id":0,"Subid":0,"Expression":"2+2","ValidExp":true,"Time":200,"Status":0,"Result":0},"2+22":{"Id":1,"Subid":0,"Expression":"2+22","ValidExp":true,"Time":200,"Status":0,"Result":0}},"TimeOper":{"Plus":50,"Minus":50,"Mul":50,"Div":50,"All":200}}

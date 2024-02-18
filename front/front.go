@@ -50,8 +50,8 @@ type Agents struct {
 // для отображения
 type Data struct {
 	cashe    map[string]*template.Template //сохраняем страницы что бы не читать с диска
-	ListTask []*Task                       `json:"-"` //сохраняем данные
-	MapTask  map[string]*Task              `json:"-"`
+	ListTask []*Task                       //`json:"-"` //сохраняем данные
+	MapTask  map[string]*Task              //`json:"-"`
 	srvList  []*Agents
 	TimeOper Operation //`json:"-"`
 	mu       sync.Mutex

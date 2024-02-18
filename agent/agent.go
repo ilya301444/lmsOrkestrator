@@ -41,7 +41,7 @@ type Agent struct {
 	Loacaladdr string // адрес агента
 	Status     int    // < 0  - мёртв 100 - жив если 100 раз мёртв(100с) - то исключаем из агентов(нужно для сервера)
 
-	operLimit  front.Operation //лимит времени выполнения подзадачи
+	OperLimit  front.Operation //лимит времени выполнения подзадачи
 	mu         sync.RWMutex
 	numTread   int
 	limitTread int
@@ -61,11 +61,11 @@ func init() {
 	agent.limitTread = runtime.NumCPU() - 1
 	agent.Status = 100 //после 100 раза (100с) без ответа будет значить что сервис умер
 
-	agent.operLimit.All = 200
-	agent.operLimit.Plus = 50
-	agent.operLimit.Minus = 50
-	agent.operLimit.Mul = 50
-	agent.operLimit.Div = 50
+	agent.OperLimit.All = 200
+	agent.OperLimit.Plus = 50
+	agent.OperLimit.Minus = 50
+	agent.OperLimit.Mul = 50
+	agent.OperLimit.Div = 50
 }
 
 // функции отладки для агента
@@ -180,9 +180,9 @@ func (a *Agent) getTimeLimit(exp string) int {
 	div := strings.Count(exp, "/")
 	//если не только 1 знак в выражении
 	if plus+minus+mul+div > 0 {
-		return plus*a.operLimit.Plus + minus*a.operLimit.Minus + mul*a.operLimit.Mul + div*a.operLimit.Div
+		return plus*a.OperLimit.Plus + minus*a.OperLimit.Minus + mul*a.OperLimit.Mul + div*a.OperLimit.Div
 	}
-	return a.operLimit.All
+	return a.OperLimit.All
 }
 
 // останавливаем все задачи
@@ -214,7 +214,7 @@ func (a *Agent) newTimeLimit(w http.ResponseWriter, r *http.Request) {
 
 	Log("update time limit")
 	a.mu.Lock()
-	a.operLimit = timeOper
+	a.OperLimit = timeOper
 	a.mu.Unlock()
 	a.reboot(w, r) // перезагружаем и удаляем все таски
 }

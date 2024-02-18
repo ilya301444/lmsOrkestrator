@@ -37,7 +37,6 @@ type Operation struct {
 	Mul   int
 	Div   int
 	All   int
-	mu    sync.Mutex
 }
 
 // список агентов которые нужны для отображения
@@ -51,10 +50,10 @@ type Agents struct {
 // для отображения
 type Data struct {
 	cashe    map[string]*template.Template //сохраняем страницы что бы не читать с диска
-	listTask []*Task                       //сохраняем данные что бы не обращаться к бд постоянно
-	mapTask  map[string]*Task
+	ListTask []*Task                       `json:"-"` //сохраняем данные
+	MapTask  map[string]*Task              `json:"-"`
 	srvList  []*Agents
-	timeOper Operation
+	TimeOper Operation //`json:"-"`
 	mu       sync.Mutex
 }
 
@@ -63,17 +62,19 @@ var adrSrv = "localhost:8010"
 var srvStatus = 0 // 0 - нет ответа от сервера 1 - норм 2 - нет связи ни с одним агентов
 
 func init() {
-	data.mapTask = make(map[string]*Task)
+	data.MapTask = make(map[string]*Task)
 
-	data.timeOper.All = 200
-	data.timeOper.Plus = 50
-	data.timeOper.Minus = 50
-	data.timeOper.Mul = 50
-	data.timeOper.Div = 50
+	data.TimeOper.All = 200
+	data.TimeOper.Plus = 50
+	data.TimeOper.Minus = 50
+	data.TimeOper.Mul = 50
+	data.TimeOper.Div = 50
 }
 
 // StartFront точка старнта фронта
 func StartFront(ctx context.Context) (func(context.Context) error, error) {
+	restoreCondact()
+
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/", data.main)
 	serverMux.HandleFunc("/listtask", data.list)
@@ -87,6 +88,7 @@ func StartFront(ctx context.Context) (func(context.Context) error, error) {
 	srv := &http.Server{Addr: ":8000", Handler: serverMux}
 	go func() {
 		err := srv.ListenAndServe()
+		data.saveCondact()
 		PrintEr(err)
 	}()
 
@@ -121,7 +123,7 @@ func (d *Data) main(w http.ResponseWriter, r *http.Request) {
 
 // список задач
 func (d *Data) list(w http.ResponseWriter, r *http.Request) {
-	err := data.cashe["listtask"].Execute(w, d.listTask)
+	err := data.cashe["listtask"].Execute(w, d.ListTask)
 	PrintEr(err)
 }
 
@@ -154,16 +156,16 @@ func (d *Data) new(w http.ResponseWriter, r *http.Request) {
 // addData добавляем выражения в массив данных
 func (d *Data) addData(expression string, res bool) error {
 	///previosId := 0
-	previosId := len(d.listTask)
+	previosId := len(d.ListTask)
 
 	newData := &Task{
 		Id: previosId, Expression: expression,
-		ValidExp: res, Time: d.timeOper.All,
+		ValidExp: res, Time: d.TimeOper.All,
 		Status: 0,
 	}
 
-	if _, ok := data.mapTask[expression]; !ok {
-		data.mapTask[expression] = newData
+	if _, ok := data.MapTask[expression]; !ok {
+		data.MapTask[expression] = newData
 
 		if res {
 			//посылаем данные
@@ -173,7 +175,7 @@ func (d *Data) addData(expression string, res bool) error {
 				err = d.sendSrv(newData)
 			}
 		}
-		data.listTask = append(d.listTask, newData)
+		data.ListTask = append(d.ListTask, newData)
 		Log(newData)
 	}
 	return nil
@@ -200,8 +202,11 @@ func (d *Data) getAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := tsk.Id
-	d.listTask[id].Result = tsk.Result
-	d.listTask[id].Status = 1
+
+	if id < len(d.ListTask) && d.ListTask[id].Id == id {
+		d.ListTask[id].Result = tsk.Result
+		d.ListTask[id].Status = 1
+	}
 }
 
 // Send посылает даннные через пост в виде json по адресу
@@ -220,7 +225,7 @@ func Send(a interface{}, urlAdr string) error {
 
 // setting страница с настройками выполнения задач
 func (d *Data) setting(w http.ResponseWriter, r *http.Request) {
-	err := data.cashe["setting"].Execute(w, d.timeOper)
+	err := data.cashe["setting"].Execute(w, d.TimeOper)
 	PrintEr(err)
 
 	plus := r.FormValue("plus")
@@ -232,38 +237,38 @@ func (d *Data) setting(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case plus != "":
 		tm, err := strconv.Atoi(plus)
-		if err != nil || tm == d.timeOper.Plus {
+		if err != nil || tm == d.TimeOper.Plus {
 			return
 		}
-		d.timeOper.Plus = tm
+		d.TimeOper.Plus = tm
 	case minus != "":
 		tm, err := strconv.Atoi(minus)
-		if err != nil || tm == d.timeOper.Minus {
+		if err != nil || tm == d.TimeOper.Minus {
 			return
 		}
-		d.timeOper.Minus = tm
+		d.TimeOper.Minus = tm
 	case mul != "":
 		tm, err := strconv.Atoi(mul)
-		if err != nil || tm == d.timeOper.Mul {
+		if err != nil || tm == d.TimeOper.Mul {
 			return
 		}
-		d.timeOper.Mul = tm
+		d.TimeOper.Mul = tm
 	case div != "":
 		tm, err := strconv.Atoi(div)
-		if err != nil || tm == d.timeOper.Div {
+		if err != nil || tm == d.TimeOper.Div {
 			return
 		}
-		d.timeOper.Div = tm
+		d.TimeOper.Div = tm
 	case all != "":
 		tm, err := strconv.Atoi(all)
-		if err != nil || tm == d.timeOper.All {
+		if err != nil || tm == d.TimeOper.All {
 			return
 		}
-		d.timeOper.All = tm
+		d.TimeOper.All = tm
 	}
 
 	if plus != "" || minus != "" || mul != "" || div != "" || all != "" {
-		Send(d.timeOper, "http://"+adrSrv+"/updateTime")
+		Send(d.TimeOper, "http://"+adrSrv+"/updateTime")
 		fmt.Println(plus, minus, mul, div, all)
 	}
 }

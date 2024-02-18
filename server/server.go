@@ -12,7 +12,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"last/agent"
 	"last/front"
@@ -33,7 +32,7 @@ type Orkestrator struct {
 	agents     map[string]*agent.Agent //список серверов(агентов ) готовых выполнить задачу
 	Tasks      []*front.Task           //очередь из задач
 	taskInWork map[int]*TaskInWork     // task.Id TaskInWork
-	timeLimit  int                     //тк  всё вычисляется на агенте и мы только отсылаем задачу мы можем знать
+	TimeLimit  int                     //тк  всё вычисляется на агенте и мы только отсылаем задачу мы можем знать
 	//передельное время
 
 	mu sync.Mutex
@@ -43,12 +42,13 @@ var (
 	orkestr      Orkestrator
 	addrFront    = "localhost:8000"
 	serverStatus = 2
+	fileBackup   = "./server/serverSave.txt"
 )
 
 func init() {
 	orkestr.agents = make(map[string]*agent.Agent)
 	orkestr.taskInWork = make(map[int]*TaskInWork)
-	orkestr.timeLimit = 200 // по умолчанию
+	orkestr.TimeLimit = 200 // по умолчанию
 }
 
 //стартуем сервер и бдем слушать запросы
@@ -91,24 +91,25 @@ func (o *Orkestrator) saveCondact() {
 		Logg(err)
 		return
 	}
-	fmt.Println(string(data))
+	Log("save condact")
 
-	f, err := os.OpenFile("serverSaveState.txt", os.O_CREATE|os.O_WRONLY, 0666)
+	os.Remove(fileBackup)
+	f, err := os.OpenFile(fileBackup, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		Logg(err)
 		return
 	}
-	defer f.Close()
+
+	f.WriteString(string(data))
+	f.Close()
 	for k := range o.agents {
 		http.Get("http://localhost" + k + "/reboot")
 	}
-	//f.Write(data)
-	f.WriteString(string(data))
 }
 
 //восстанавливаем состояние
 func restoreCondact() {
-	f, err := os.Open("serverSaveState.txt")
+	f, err := os.Open(fileBackup)
 	if err != nil {
 		Logg(err)
 		return
@@ -243,7 +244,7 @@ func (o *Orkestrator) updateTime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	o.mu.Lock()
-	o.timeLimit = timeOper.All
+	o.TimeLimit = timeOper.All
 	o.mu.Unlock()
 
 	//обновляем время на всех агентах
@@ -261,9 +262,7 @@ func (o *Orkestrator) updateTime(w http.ResponseWriter, r *http.Request) {
 }
 
 // следим за тасками которые выполняются чтоб не превысили время
-//если время превышено максимальный лимит
-//если превысил и
-//или если  агент отволился то все его задачи сново в очередь отсылаем
+// если  агент отволился то все его задачи сново в очередь отсылаем
 func (o *Orkestrator) MainOrkestrator() {
 	go func() {
 		for {
@@ -275,6 +274,7 @@ func (o *Orkestrator) MainOrkestrator() {
 				if v.task.Time <= 0 {
 					Logg("task delete ", v.task.Id)
 					delete(o.taskInWork, v.task.Id)
+					v.task.Time = o.TimeLimit
 					o.Tasks = append(o.Tasks, v.task)
 				}
 			}

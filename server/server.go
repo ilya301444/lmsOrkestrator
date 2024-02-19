@@ -51,7 +51,7 @@ func init() {
 	orkestr.TimeLimit = 200 // по умолчанию
 }
 
-//стартуем сервер и бдем слушать запросы
+// стартуем сервер и бдем слушать запросы
 func StartSrv(ctx context.Context) (func(context.Context) error, error) {
 	serverMux := http.NewServeMux()
 	restoreCondact()
@@ -76,7 +76,7 @@ func StartSrv(ctx context.Context) (func(context.Context) error, error) {
 	return srv.Shutdown, nil
 }
 
-//сохраняем состояние
+// сохраняем состояние
 func (o *Orkestrator) saveCondact() {
 	//добавляем таски из листа в рабте в очередь
 	o.mu.Lock()
@@ -107,7 +107,7 @@ func (o *Orkestrator) saveCondact() {
 	}
 }
 
-//восстанавливаем состояние
+// восстанавливаем состояние
 func restoreCondact() {
 	f, err := os.Open(fileBackup)
 	if err != nil {
@@ -230,7 +230,7 @@ func (o *Orkestrator) sendAnswerTask(w http.ResponseWriter, r *http.Request) {
 	front.Send(&tsk, "http://"+addrFront+"/getAnswer")
 }
 
-//послыаем агенту структуру с обновлённым временем выполнения задач
+// послыаем агенту структуру с обновлённым временем выполнения задач
 func (o *Orkestrator) updateTime(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -303,7 +303,7 @@ func (o *Orkestrator) MainOrkestrator() {
 	}()
 }
 
-//отсылаем обновлённый список агентов на сервер если что то изменилось
+// отсылаем обновлённый список агентов на сервер если что то изменилось
 func (o *Orkestrator) agentUpdate() {
 	lstAgent := []*front.Agents{}
 	agent := &front.Agents{}
@@ -318,6 +318,7 @@ func (o *Orkestrator) agentUpdate() {
 	front.Send(lstAgent, "http://"+addrFront+"/updateAgents")
 }
 
+// запрашиваем с фронта и посылаем ответ
 // изменяем статус сервера и он сообщает об ошибах (есть или нет)
 func (o *Orkestrator) statusSrv(w http.ResponseWriter, r *http.Request) {
 	o.mu.Lock()

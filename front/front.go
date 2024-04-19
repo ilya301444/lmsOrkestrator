@@ -22,7 +22,6 @@ import (
 
 type Task struct { // данные таски которые будут передаваться в html
 	Id         int
-	Subid      int    // для того что бы понять как потом собирать задачу
 	Expression string //будет также уникальным идентификатором выражения
 	ValidExp   bool   //валидоно или не валидно выражение
 	Time       int    //в секундах
@@ -50,8 +49,8 @@ type Agents struct {
 // для отображения
 type Data struct {
 	cashe    map[string]*template.Template //сохраняем страницы что бы не читать с диска
-	ListTask []*Task                       //`json:"-"` //сохраняем данные
-	MapTask  map[string]*Task              //`json:"-"`
+	ListTask []*Task
+	MapTask  map[string]*Task
 	srvList  []*Agents
 	TimeOper Operation //`json:"-"`
 	mu       sync.Mutex
@@ -72,8 +71,8 @@ func init() {
 }
 
 // StartFront точка старнта фронта
-func StartFront(ctx context.Context) (func(context.Context) error, error) {
-	restoreCondact()
+func StartFront() (func(context.Context) error, error) {
+	data.restoreCondact()
 
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/", data.main)

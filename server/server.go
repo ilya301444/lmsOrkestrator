@@ -5,7 +5,8 @@
 // порядок их выполнения. Далее будем называть его оркестратором.
 // Функции оркестрации выполняют MainOrkestrator и getTask
 /*
-localhost:8010
+localhost:7010
+localhost:8010 http server
 */
 package server
 
@@ -16,10 +17,11 @@ import (
 	"last/agent"
 	"last/front"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 )
 
 type TaskInWork struct {
@@ -52,110 +54,46 @@ func init() {
 }
 
 // стартуем сервер и бдем слушать запросы
-func StartSrv(ctx context.Context) (func(context.Context) error, error) {
+func StartSrv(ctx context.Context) (func(context.Context) error, *grpc.Server, error) {
 	serverMux := http.NewServeMux()
 	restoreCondact()
 
 	serverMux.HandleFunc("/", orkestr.newTask)
 	//агент может получить таску
-	serverMux.HandleFunc("/getTask", orkestr.getTask)
-	serverMux.HandleFunc("/sendTask", orkestr.sendAnswerTask)
-	serverMux.HandleFunc("/updateTime", orkestr.updateTime)
-	serverMux.HandleFunc("/statusSrv", orkestr.statusSrv)
+	// serverMux.HandleFunc("/getTask", orkestr.getTask)
+	// serverMux.HandleFunc("/sendTask", orkestr.sendAnswerTask)
+	// serverMux.HandleFunc("/updateTime", orkestr.updateTime)
+	// serverMux.HandleFunc("/heartBit", orkestr.heartBit)
 
+	serverMux.HandleFunc("/statusSrv", orkestr.statusSrv)
 	srv := &http.Server{Addr: ":8010", Handler: serverMux}
 	go func() {
 		err := srv.ListenAndServe()
-
 		orkestr.saveCondact()
 		agent.PrintEr(err)
 	}()
 
 	orkestr.MainOrkestrator()
 
-	return srv.Shutdown, nil
+	srv2 := SrvGrpcStart("localhost:7010")
+	return srv.Shutdown, srv2, nil
 }
 
-// сохраняем состояние
-func (o *Orkestrator) saveCondact() {
-	//добавляем таски из листа в рабте в очередь
-	o.mu.Lock()
-	for k, v := range o.taskInWork {
-		o.Tasks = append(o.Tasks, v.task)
-		delete(o.taskInWork, k)
-	}
-	o.mu.Unlock()
-
-	data, err := json.Marshal(o)
-	if err != nil {
-		Logg(err)
-		return
-	}
-	Log("save condact")
-
-	os.Remove(fileBackup)
-	f, err := os.OpenFile(fileBackup, os.O_CREATE|os.O_RDWR, 0666)
-	if err != nil {
-		Logg(err)
-		return
-	}
-
-	f.WriteString(string(data))
-	f.Close()
-	for k := range o.agents {
-		http.Get("http://localhost" + k + "/reboot")
-	}
-}
-
-// восстанавливаем состояние
-func restoreCondact() {
-	f, err := os.Open(fileBackup)
-	if err != nil {
-		Logg(err)
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		Logg(err)
-		return
-	}
-
-	err = json.Unmarshal(data, &orkestr)
-	if err != nil {
-		Logg(err)
-		return
-	}
-}
-
-// front - server
-// newTask полученная с фронта
-func (o *Orkestrator) newTask(w http.ResponseWriter, r *http.Request) {
-	body := r.Body
-	data, err := io.ReadAll(body)
-	if err != nil {
-		agent.PrintEr(err)
-		return
-	}
-	Log("New task:", string(data))
-
-	tsk := front.Task{}
-	err = json.Unmarshal(data, &tsk)
-	if err != nil {
-		agent.PrintEr(err)
-		return
-	}
-	//записываем в очередь
-	o.mu.Lock()
-	o.Tasks = append(o.Tasks, &tsk)
-	o.mu.Unlock()
-}
+// func StartSrv(ctx context.Context) (*grpc.Server, error) {
+// 	var srv *grpc.Server
+// 	restoreCondact()
+// 	srv = SrvGrpcStart("localhost:7010")
+// 	orkestr.MainOrkestrator()
+// 	Log("started server")
+// 	return srv, nil
+// }
 
 // server - agent
 // отдаём задачу агенту
 // агент спаминт нас запросами мы ему отдаём таски
 // это функция по получению Хёртбита и добавления новых агентов и отдачи таски
 // новому агенту
+/*
 func (o *Orkestrator) getTask(w http.ResponseWriter, r *http.Request) {
 	body := r.Body
 	data, err := io.ReadAll(body)
@@ -204,6 +142,23 @@ func (o *Orkestrator) getTask(w http.ResponseWriter, r *http.Request) {
 		front.Send(tsk, "http://localhost"+addrAgent+"/newTask")
 		Log("Task Sending to agent")
 	}
+}
+
+func (o *Orkestrator) heartBit(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		agent.PrintEr(err)
+		return
+	}
+	//получили запрос от агента и распасим его данные
+	var ag agent.Agent
+	if err := json.Unmarshal(data, &ag); err != nil {
+		agent.PrintEr(err)
+		return
+	}
+	o.mu.Lock()
+	o.agents[ag.Loacaladdr] = &ag //записываем нового агента если есть обновляем
+	o.mu.Unlock()
 }
 
 // получаем таску с ответом
@@ -260,6 +215,7 @@ func (o *Orkestrator) updateTime(w http.ResponseWriter, r *http.Request) {
 	}
 	o.mu.Unlock()
 }
+*/
 
 // следим за тасками которые выполняются чтоб не превысили время
 // если  агент отволился то все его задачи сново в очередь отсылаем
@@ -303,7 +259,30 @@ func (o *Orkestrator) MainOrkestrator() {
 	}()
 }
 
-// отсылаем обновлённый список агентов на сервер если что то изменилось
+// front - server
+// newTask полученная с фронта
+func (o *Orkestrator) newTask(w http.ResponseWriter, r *http.Request) {
+	body := r.Body
+	data, err := io.ReadAll(body)
+	if err != nil {
+		agent.PrintEr(err)
+		return
+	}
+	Log("New task:", string(data))
+
+	tsk := front.Task{}
+	err = json.Unmarshal(data, &tsk)
+	if err != nil {
+		agent.PrintEr(err)
+		return
+	}
+	//записываем в очередь
+	o.mu.Lock()
+	o.Tasks = append(o.Tasks, &tsk)
+	o.mu.Unlock()
+}
+
+// отсылаем обновлённый список агентов на фронт если что то изменилось
 func (o *Orkestrator) agentUpdate() {
 	lstAgent := []*front.Agents{}
 	agent := &front.Agents{}

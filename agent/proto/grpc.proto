@@ -1,0 +1,38 @@
+
+
+syntax="proto3";
+package srvproto;
+option go_package="last/server/proto";
+
+message Agent{
+    int32 Id = 1;
+	string Loacaladdr = 2;
+	int32 Status = 3;
+}
+
+message Task{
+    int32 Id = 1;
+    string Expression = 2;
+    bool ValidExp = 3;  
+	int32 Time = 4;     
+	int32 Status = 5;     
+	int64 Result  = 6;  
+}
+
+message TimeLimit{
+    int32 Plus = 1;
+    int32 Minus = 2;
+    int32 Mul = 3;
+    int32 Div = 4;
+    int32 All = 5;
+}
+
+message Zero {}
+
+service Messege {
+    rpc TaskAgent(Agent) returns(Zero);
+    rpc HertBit(Agent) returns(Zero);
+    rpc TaskToAgent(Task) returns (Zero);
+    rpc UpdateTimeLimit(TimeLimit) returns (Zero);
+    rpc AnswerTask(Task) returns(Zero);
+}

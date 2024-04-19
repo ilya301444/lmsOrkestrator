@@ -1,11 +1,11 @@
 package server
 
-import "fmt"
+import "log"
 
 func Log(s ...string) {
-	fmt.Println("log srv: ", s)
+	log.Println("log srv: ", s)
 }
 
 func Logg(s ...interface{}) {
-	fmt.Println("log srv: ", s)
+	log.Println("log srv: ", s)
 }

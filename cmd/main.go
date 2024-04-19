@@ -35,18 +35,17 @@ func main() {
 	}
 
 	ctx := context.Background()
-	downFront, err := front.StartFront(ctx)
-	printEr(err)
-	downServ, err := server.StartSrv(ctx)
-	printEr(err)
 	downAgent, err := agent.StartAgent(ctx, port)
 	printEr(err)
+	downFront, err := front.StartFront()
+	printEr(err)
+	downServ, downServ2, err := server.StartSrv(ctx)
+	printEr(err)
 
-	fmt.Println(0)
 	// При нажатии ctl C происходит подача данных в канал sigChan
 	// и выход из прогаммы
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	signal.Notify(sigChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, os.Interrupt)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -54,8 +53,9 @@ func main() {
 	fmt.Println("Press ctrl+C for Exit")
 	<-sigChan
 
-	downAgent(ctx)
-	downFront(ctx)
-	downServ(ctx)
-	time.Sleep(10 * time.Millisecond)
+	go downAgent.GracefulStop()
+	go downFront(ctx)
+	go downServ(ctx)
+	go downServ2.GracefulStop()
+	time.Sleep(400 * time.Millisecond)
 }

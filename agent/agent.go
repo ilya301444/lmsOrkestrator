@@ -34,6 +34,7 @@ import (
 	"time"
 
 	expp "github.com/overseven/go-math-expression-parser/parser"
+	"google.golang.org/grpc"
 )
 
 type Agent struct {
@@ -41,7 +42,7 @@ type Agent struct {
 	Loacaladdr string // адрес агента
 	Status     int    // < 0  - мёртв 100 - жив если 100 раз мёртв(100с) - то исключаем из агентов(нужно для сервера)
 
-	OperLimit  front.Operation //лимит времени выполнения подзадачи
+	operLimit  front.Operation //лимит времени выполнения подзадачи
 	mu         sync.RWMutex
 	numTread   int
 	limitTread int
@@ -50,7 +51,7 @@ type Agent struct {
 }
 
 var (
-	serverAddr = "127.0.0.1:8010" //addres orkestratora
+	serverAddr = "127.0.0.1:7010" //addres orkestratora
 	//настройки интервала отправки запроса на сервер
 	timeSleep = 1000 * time.Millisecond
 	agent     Agent
@@ -59,59 +60,65 @@ var (
 func init() {
 	agent.numTread = runtime.NumCPU() - 1
 	agent.limitTread = runtime.NumCPU() - 1
-	agent.Status = 100 //после 100 раза (100с) без ответа будет значить что сервис умер
 
-	agent.OperLimit.All = 200
-	agent.OperLimit.Plus = 50
-	agent.OperLimit.Minus = 50
-	agent.OperLimit.Mul = 50
-	agent.OperLimit.Div = 50
+	// agent.numTread = 5
+	// agent.limitTread = 5
+	agent.stop = make(chan struct{}, 3)
+	agent.Status = 100 //после 100 раза (100с) без ответа будет значить что сервис умер
+	agent.operLimit.All = 200
+	agent.operLimit.Plus = 50
+	agent.operLimit.Minus = 50
+	agent.operLimit.Mul = 50
+	agent.operLimit.Div = 50
 }
 
 // функции отладки для агента
 func PrintEr(err error) {
 	if err != nil {
-		fmt.Println("log:", err)
+		log.Println("log agent:", err)
 	}
 }
 
 func FatalEr(err error) {
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("agent fatall err: ", err)
 	}
 }
 
 // Log для агента
 func Log(s string) {
-	fmt.Println("agent log:", s)
+	log.Println("agent log:", s)
 }
 
 func Logg(s ...interface{}) {
-	fmt.Println("agent log:", s)
+	log.Println("agent log:", s)
 }
 
 // StartAgent запускает основу с которой будет общаться
-func StartAgent(ctx context.Context, port string) (func(context.Context) error, error) {
-	serveMux := http.NewServeMux()
-	//удаляем все вычисления
-	serveMux.HandleFunc("/reboot", agent.reboot)
-	serveMux.HandleFunc("/newTimeLimit", agent.newTimeLimit)
-	serveMux.HandleFunc("/newTask", agent.newTask)
+// func StartAgent(ctx context.Context, port string) (func(context.Context) error, error) {
 
+// 	serveMux := http.NewServeMux()
+// 	serveMux.HandleFunc("/newTimeLimit", agent.newTimeLimit)
+// 	serveMux.HandleFunc("/newTask", agent.newTask)
+
+// 	agent.Loacaladdr = ":" + port
+// 	agent.stop = make(chan struct{}, 32)
+// 	agent.servrConn()
+
+// 	srv := &http.Server{Addr: agent.Loacaladdr, Handler: serveMux}
+// 	go func() {
+// 		_ = srv.ListenAndServe()
+// 		agent.stopAgent <- struct{}{}
+// 	}()
+
+// 	return srv.Shutdown, nil
+// }
+
+func StartAgent(ctx context.Context, port string) (*grpc.Server, error) {
+	var srv *grpc.Server
 	agent.Loacaladdr = ":" + port
-	agent.stop = make(chan struct{}, 32)
-	agent.servrConn()
-
-	srv := &http.Server{Addr: agent.Loacaladdr, Handler: serveMux}
-	go func() {
-		err := srv.ListenAndServe()
-
-		agent.stopAgent <- struct{}{}
-		agent.stopAgent <- struct{}{}
-		PrintEr(err)
-	}()
-
-	return srv.Shutdown, nil
+	srv = SrvGrpcStart(agent.Loacaladdr)
+	return srv, nil
 }
 
 // типа оркестратор в агенте (запускает потоки, как только пришла задача от сервера от сервера)
@@ -126,11 +133,12 @@ func (a *Agent) servrConn() {
 			data := a
 			a.mu.RUnlock()
 
-			err := front.Send(data, "http://"+serverAddr+"/getTask")
+			err := front.Send(data, "http://"+serverAddr+"/heartBit")
 			PrintEr(err)
 
 			select {
 			case <-a.stopAgent:
+				Log("agent 2 close")
 				return
 			default:
 			}
@@ -164,6 +172,7 @@ func (a *Agent) servrConn() {
 
 			select {
 			case <-a.stopAgent:
+				Log("agent 1 close")
 				return
 			default:
 			}
@@ -173,20 +182,19 @@ func (a *Agent) servrConn() {
 
 // выдаёт сколько времени надо выполнять задачу в зависимости от знака в выражении
 func (a *Agent) getTimeLimit(exp string) int {
-
 	plus := strings.Count(exp, "+")
 	minus := strings.Count(exp, "-")
 	mul := strings.Count(exp, "*")
 	div := strings.Count(exp, "/")
 	//если не только 1 знак в выражении
 	if plus+minus+mul+div > 0 {
-		return plus*a.OperLimit.Plus + minus*a.OperLimit.Minus + mul*a.OperLimit.Mul + div*a.OperLimit.Div
+		return plus*a.operLimit.Plus + minus*a.operLimit.Minus + mul*a.operLimit.Mul + div*a.operLimit.Div
 	}
-	return a.OperLimit.All
+	return a.operLimit.All
 }
 
 // останавливаем все задачи
-func (a *Agent) reboot(w http.ResponseWriter, r *http.Request) {
+func (a *Agent) reboot() {
 	Log("rebooting")
 	a.mu.Lock()
 	count := a.limitTread - a.numTread
@@ -214,9 +222,9 @@ func (a *Agent) newTimeLimit(w http.ResponseWriter, r *http.Request) {
 
 	Log("update time limit")
 	a.mu.Lock()
-	a.OperLimit = timeOper
+	a.operLimit = timeOper
 	a.mu.Unlock()
-	a.reboot(w, r) // перезагружаем и удаляем все таски
+	a.reboot() // перезагружаем и удаляем все таски
 }
 
 // получаем задачу и запускаем горутину для её выполнения

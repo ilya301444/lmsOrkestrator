@@ -35,7 +35,7 @@
 
 
 Пояснения для запуска
-Для запуска нужно go 1.16 ; git ; скачать go get github.com/overseven/go-math-expression-parser
+Для запуска нужно go 1.16 или выше; git ; скачать go get github.com/overseven/go-math-expression-parser
 
 Запуск проводился в терминале в VScode в Windows 10
 Данная программа запускается как монолит и не разделена на подпрограммы 

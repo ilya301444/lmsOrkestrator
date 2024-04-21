@@ -56,7 +56,6 @@ func (s *Server) TaskAgent(ctx context.Context, in *pb.Agent) (*pb.Zero, error) 
 		orkestr.taskInWork[tsk.Id] = &TaskInWork{tsk, ag.Loacaladdr}
 		orkestr.mu.Unlock()
 
-		//front.Send(tsk, "http://localhost"+addrAgent+"/newTask")
 		sendTask(addrAgent, tsk)
 		Log("Task Sending to agent")
 	}

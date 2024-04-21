@@ -10,12 +10,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,12 +47,18 @@ type Agents struct {
 	Status int
 }
 
-// массив текущих данных (пока без Sql)
+type User struct {
+	Login string
+	Pass  string
+	Jwt   string
+}
+
 // для отображения
 type Data struct {
 	cashe    map[string]*template.Template //сохраняем страницы что бы не читать с диска
 	ListTask []*Task
 	MapTask  map[string]*Task
+	User     map[string]User //Храним данные о пользователях
 	srvList  []*Agents
 	TimeOper Operation //`json:"-"`
 	mu       sync.Mutex
@@ -62,12 +70,45 @@ var srvStatus = 0 // 0 - нет ответа от сервера 1 - норм 2 
 
 func init() {
 	data.MapTask = make(map[string]*Task)
+	data.User = make(map[string]User)
 
 	data.TimeOper.All = 200
 	data.TimeOper.Plus = 50
 	data.TimeOper.Minus = 50
 	data.TimeOper.Mul = 50
 	data.TimeOper.Div = 50
+}
+
+func Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("URL", r.URL.Path)
+		if strings.HasPrefix(r.URL.String(), "/login") || strings.HasPrefix(r.URL.String(), "/registr") ||
+			strings.HasPrefix(r.URL.String(), "/api/v1/registr") || strings.HasPrefix(r.URL.String(), "/api/v1/login") ||
+			strings.HasPrefix(r.URL.String(), "/getAnswer") || strings.HasPrefix(r.URL.String(), "/updateAgents") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		cookie, err := r.Cookie("jwtToken")
+		if errors.Is(err, http.ErrNoCookie) {
+			fmt.Println("cookie not found")
+			http.Error(w, "cookie not found", http.StatusBadRequest)
+		}
+		if err != nil {
+			fmt.Println(1)
+			Log(err)
+			http.Redirect(w, r, "/login", http.StatusUnauthorized)
+			return
+		}
+
+		if checkValidJwt(cookie.Value) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		Log("invalid token")
+		http.Redirect(w, r, "/login", http.StatusUnauthorized)
+
+	})
 }
 
 // StartFront точка старнта фронта
@@ -84,7 +125,12 @@ func StartFront() (func(context.Context) error, error) {
 	serverMux.HandleFunc("/updateAgents", data.updateAgents)
 	serverMux.HandleFunc("/getAgentList", data.getAgentList)
 
-	srv := &http.Server{Addr: ":8000", Handler: serverMux}
+	serverMux.HandleFunc("/registr", data.pageRegistratration)
+	serverMux.HandleFunc("/api/v1/registr", data.registrUser)
+	serverMux.HandleFunc("/login", data.pageLogin)
+	serverMux.HandleFunc("/api/v1/login", data.login)
+
+	srv := &http.Server{Addr: ":8000", Handler: Middleware(serverMux)}
 	go func() {
 		err := srv.ListenAndServe()
 		data.saveCondact()
@@ -108,6 +154,12 @@ func StartFront() (func(context.Context) error, error) {
 	templ, err = template.ParseFiles("front/template/main.html")
 	FatalEr(err)
 	data.cashe["main"] = templ
+	templ, err = template.ParseFiles("front/template/login.html")
+	FatalEr(err)
+	data.cashe["login"] = templ
+	templ, err = template.ParseFiles("front/template/registr.html")
+	FatalEr(err)
+	data.cashe["registr"] = templ
 
 	checkSrvStatus()
 

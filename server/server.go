@@ -13,6 +13,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"last/agent"
 	"last/front"
@@ -59,11 +60,6 @@ func StartSrv(ctx context.Context) (func(context.Context) error, *grpc.Server, e
 	restoreCondact()
 
 	serverMux.HandleFunc("/", orkestr.newTask)
-	//агент может получить таску
-	// serverMux.HandleFunc("/getTask", orkestr.getTask)
-	// serverMux.HandleFunc("/sendTask", orkestr.sendAnswerTask)
-	// serverMux.HandleFunc("/updateTime", orkestr.updateTime)
-	// serverMux.HandleFunc("/heartBit", orkestr.heartBit)
 
 	serverMux.HandleFunc("/statusSrv", orkestr.statusSrv)
 	srv := &http.Server{Addr: ":8010", Handler: serverMux}
@@ -233,7 +229,7 @@ func (o *Orkestrator) MainOrkestrator() {
 					v.task.Time = o.TimeLimit
 					o.Tasks = append(o.Tasks, v.task)
 				}
-			}
+			}git 
 			o.mu.Unlock()
 
 			//проверяем агенты
@@ -241,6 +237,7 @@ func (o *Orkestrator) MainOrkestrator() {
 			o.mu.Lock()
 			for _, ag := range o.agents {
 				ag.Status--
+
 				if ag.Status <= 0 {
 					Log("agent delete", ag.Loacaladdr)
 					delete(o.agents, ag.Loacaladdr)
@@ -285,6 +282,7 @@ func (o *Orkestrator) newTask(w http.ResponseWriter, r *http.Request) {
 // отсылаем обновлённый список агентов на фронт если что то изменилось
 func (o *Orkestrator) agentUpdate() {
 	lstAgent := []*front.Agents{}
+	fmt.Println("lstAgents", lstAgent)
 	agent := &front.Agents{}
 	o.mu.Lock()
 	for _, v := range o.agents {

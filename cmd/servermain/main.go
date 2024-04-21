@@ -27,7 +27,7 @@ func printEr(err error) {
 func main() {
 
 	ctx := context.Background()
-	downServ, err := server.StartSrv(ctx)
+	downServ, downServ2, err := server.StartSrv(ctx)
 	printEr(err)
 
 	fmt.Println(0)
@@ -42,6 +42,7 @@ func main() {
 	fmt.Println("Press ctrl+C for Exit")
 	<-sigChan
 
-	downServ(ctx)
+	go downServ(ctx)
+	go downServ2.GracefulStop()
 	time.Sleep(10 * time.Millisecond)
 }

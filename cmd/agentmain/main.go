@@ -48,6 +48,6 @@ func main() {
 	fmt.Println("Press ctrl+C for Exit")
 	<-sigChan
 
-	downAgent(ctx)
+	go downAgent.GracefulStop()
 	time.Sleep(time.Microsecond)
 }

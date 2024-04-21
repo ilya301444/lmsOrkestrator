@@ -27,9 +27,10 @@ func printEr(err error) {
 }
 
 func main() {
-	port := ""
+	port := "8033"
+	println(os.Args)
 	if len(os.Args) < 2 {
-		port = "8020"
+		port = "8025"
 	} else {
 		port = os.Args[1]
 	}

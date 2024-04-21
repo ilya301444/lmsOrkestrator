@@ -229,7 +229,7 @@ func (o *Orkestrator) MainOrkestrator() {
 					v.task.Time = o.TimeLimit
 					o.Tasks = append(o.Tasks, v.task)
 				}
-			}git 
+			}
 			o.mu.Unlock()
 
 			//проверяем агенты

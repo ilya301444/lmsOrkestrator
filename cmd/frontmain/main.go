@@ -26,8 +26,7 @@ func printEr(err error) {
 
 func main() {
 
-	ctx := context.Background()
-	downFront, err := front.StartFront(ctx)
+	downFront, err := front.StartFront()
 	printEr(err)
 
 	fmt.Println(0)
